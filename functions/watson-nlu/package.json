@@ -1,0 +1,9 @@
+{
+  "name": "analyze-emotion-fn",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "node-appwrite": "^13.0.0",
+    "ibm-watson": "^7.0.0"
+  }
+}
