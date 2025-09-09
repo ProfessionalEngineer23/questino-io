@@ -1,0 +1,146 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Enhanced Slider styling */
+.slider {
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(to right, #e5e7eb 0%, #e5e7eb 100%);
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.slider:hover {
+  height: 10px;
+}
+
+.slider::-webkit-slider-thumb {
+  appearance: none;
+  height: 24px;
+  width: 24px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #0ea5e9 0%, #3b82f6 100%);
+  cursor: pointer;
+  border: 3px solid #ffffff;
+  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.4), 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease;
+}
+
+.slider::-webkit-slider-thumb:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 16px rgba(14, 165, 233, 0.5), 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.slider::-webkit-slider-thumb:active {
+  transform: scale(0.95);
+}
+
+.slider::-moz-range-thumb {
+  height: 24px;
+  width: 24px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #0ea5e9 0%, #3b82f6 100%);
+  cursor: pointer;
+  border: 3px solid #ffffff;
+  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.4), 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease;
+}
+
+.slider::-moz-range-thumb:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 16px rgba(14, 165, 233, 0.5), 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.slider::-moz-range-thumb:active {
+  transform: scale(0.95);
+}
+
+/* sanity check (should not error anymore) */
+body { @apply bg-gray-50 text-gray-800; }
+
+/* Modern smooth animations */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Modern component styles */
+.btn {
+  @apply inline-flex items-center gap-2 rounded-xl px-4 py-2.5 font-medium transition-all duration-200 ease-out
+         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2
+         transform hover:scale-[1.02] active:scale-[0.98];
+}
+.btn-primary {
+  @apply bg-brand-500 text-white hover:bg-brand-600 focus-visible:ring-brand-500
+         shadow-sm hover:shadow-lg;
+}
+.btn-ghost {
+  @apply bg-white hover:bg-gray-50 border border-gray-200
+         hover:border-gray-300 hover:shadow-sm;
+}
+.card {
+  @apply bg-white rounded-xl shadow-sm border border-gray-100
+         transition-all duration-200 ease-out hover:shadow-md hover:border-gray-200;
+}
+.menu {
+  @apply absolute right-0 z-10 mt-2 w-44 overflow-hidden rounded-xl2 border border-gray-200 bg-white shadow-sm;
+}
+.menu-item {
+  @apply block w-full px-3 py-2 text-left hover:bg-gray-100 transition-colors duration-150;
+}
+
+/* Simple loading states */
+.loading-skeleton {
+  @apply animate-pulse bg-gray-200 rounded;
+}
+
+/* Form elements */
+input, textarea, select {
+  @apply transition-colors duration-150 focus:ring-2 focus:ring-brand-500 focus:border-brand-500;
+}
+
+/* Animation classes */
+.animate-in {
+  animation: fadeInUp 0.3s ease-out forwards;
+}
+
+.fade-in-up {
+  animation: fadeInUp 0.3s ease-out forwards;
+}
+
+.slide-in {
+  animation: slideIn 0.3s ease-out forwards;
+}
+
+.scale-in {
+  animation: scaleIn 0.2s ease-out forwards;
+}
