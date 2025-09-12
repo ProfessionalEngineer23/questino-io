@@ -1,5 +1,5 @@
 // src/SurveyBuilder.jsx
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   ensureSession,
@@ -10,6 +10,9 @@ import {
   createSurvey as createSurveyApi,
 } from "./surveyApi";
 import { useToast } from "./components/Toast.jsx";
+import { useForm } from "./hooks/useForm";
+import { validateSurveyTitle, validateQuestionText } from "./utils/validation";
+import { useAuth } from "./hooks/useAuth";
 
 // only: 'text' | 'mcq' | 'scale' | 'slider' | 'section'
 const NEW_Q = (type = "text") => ({
@@ -30,30 +33,89 @@ export default function SurveyBuilder() {
   const { id } = useParams();
   const nav = useNavigate();
   const { push } = useToast();
+  const { isGuest, user, loading: authLoading } = useAuth();
 
   const [survey, setSurvey] = useState(null);
   const [questions, setQuestions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [lastSaveTime, setLastSaveTime] = useState(null);
+  const [creating, setCreating] = useState(false);
+  const savingRef = useRef(false);
+
+  // Guest data loading functions
+  const loadGuestSurveys = () => {
+    try {
+      const guestSurveys = localStorage.getItem('questino_guest_surveys');
+      return guestSurveys ? JSON.parse(guestSurveys) : [];
+    } catch (e) {
+      console.error("Failed to load guest surveys:", e);
+      return [];
+    }
+  };
+
+  const saveGuestSurveys = (surveys) => {
+    try {
+      localStorage.setItem('questino_guest_surveys', JSON.stringify(surveys));
+    } catch (e) {
+      console.error("Failed to save guest surveys:", e);
+    }
+  };
+
+  // Form validation (bind the inputs to THIS form)
+  const surveyForm = useForm(
+    { title: "", description: "" },
+    {
+      title: [validateSurveyTitle],
+      description: [
+        (value) =>
+          value && value.length > 500
+            ? "Description must be less than 500 characters"
+            : null,
+      ],
+    }
+  );
 
   useEffect(() => {
+    // Don't run until auth state is determined
+    if (authLoading) return;
+    
     (async () => {
-      await ensureSession();
       if (!id) {
-        const doc = await createSurveyApi({
-          title: "Untitled survey",
-          description: "",
-          allowAnonymous: true,
-          isPublic: true,       // default public
-          statsPublic: true,    // default public
-        });
-        nav(`/edit/${doc.$id}`, { replace: true });
-        return;
+        // Prevent duplicate survey creation
+        if (creating) return;
+        setCreating(true);
+        
+        try {
+          // Create Appwrite survey (for all users)
+          await ensureSession();
+          const doc = await createSurveyApi({
+            title: "Untitled survey",
+            description: "",
+            allowAnonymous: true,
+            isPublic: true, // default public
+            statsPublic: true, // default public
+          });
+          nav(`/edit/${doc.$id}`, { replace: true });
+          return;
+        } catch (error) {
+          console.error("Failed to create survey:", error);
+          push("Failed to create survey", "error");
+          setCreating(false);
+        }
       }
+      
       try {
+        // Load Appwrite survey (for all users)
+        await ensureSession();
         const s = await getSurveyById(id);
         const qs = await getQuestionsForSurvey(id);
         setSurvey(s);
         setQuestions(qs);
+
+        // hydrate form from loaded survey
+        surveyForm.setValue("title", s.title ?? "");
+        surveyForm.setValue("description", s.description ?? "");
       } catch (e) {
         console.error(e);
         push("Failed to load survey", "error");
@@ -61,7 +123,8 @@ export default function SurveyBuilder() {
         setLoading(false);
       }
     })();
-  }, [id, nav, push]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, nav, push, isGuest, user, authLoading, creating]);
 
   const addQuestion = (type) => {
     setQuestions((qs) => {
@@ -80,37 +143,131 @@ export default function SurveyBuilder() {
   };
 
   const onSave = async () => {
-    try {
-      await updateSurvey(survey.$id, {
-        title: survey.title?.trim() || "Untitled survey",
-        description: survey.description?.trim() || "",
-        isPublic: !!survey.isPublic,
-        statsPublic: !!survey.statsPublic,
-      });
+    // Immediate protection using ref
+    if (savingRef.current) {
+      console.log('Save already in progress (ref check), ignoring click');
+      return;
+    }
 
+    // Prevent multiple saves
+    if (saving) {
+      console.log('Save already in progress (state check), ignoring click');
+      return;
+    }
+
+    // Prevent rapid successive saves (within 2 seconds)
+    const now = Date.now();
+    if (lastSaveTime && (now - lastSaveTime) < 2000) {
+      console.log('Save too recent, ignoring');
+      return;
+    }
+
+    // run validation against the bound form values
+    if (!surveyForm.validate()) {
+      push("Please fix validation errors before saving", "error");
+      return;
+    }
+
+    if (!survey) return;
+
+    // Set protection immediately
+    savingRef.current = true;
+    setLastSaveTime(now);
+    setSaving(true);
+    try {
+      push("Saving survey...", "info");
+
+      const originalTitle = surveyForm.values.title?.trim() || "Untitled survey";
+      
+      console.log("Save button clicked! [PROTECTED VERSION]");
+      console.log("Current survey state:", JSON.stringify(survey, null, 2));
+      console.log("Form values:", JSON.stringify(surveyForm.values, null, 2));
+
+      // Appwrite flow (for all users)
+      const updateData = {
+        title: originalTitle,
+        description: surveyForm.values.description?.trim() || "",
+        isPublic: Boolean(survey.isPublic),
+        statsPublic: Boolean(survey.statsPublic),
+      };
+      
+      console.log("Saving survey with data:", JSON.stringify(updateData, null, 2));
+      const updated = await updateSurvey(survey.$id, updateData);
+      console.log("Updated survey response:", JSON.stringify(updated, null, 2));
+
+      // Update local survey state with the updated data
+      setSurvey(prev => ({
+        ...prev,
+        title: updated.title,
+        description: updated.description,
+        isPublic: updated.isPublic,
+        statsPublic: updated.statsPublic,
+      }));
+
+       // if API resolved a conflicting title, reflect it back into the form
+       if (updated.title && updated.title !== originalTitle) {
+         surveyForm.setValue("title", updated.title);
+         push(`Survey renamed to "${updated.title}" to avoid duplicates`, "info");
+       }
+
+      // Save only real question types that your DB supports
+      const SUPPORTED = new Set(["text", "mcq", "scale"]);
       for (const [i, q] of questions.entries()) {
         if (!q._new) continue;
+        if (!SUPPORTED.has(q.type)) continue; // skip section/slider (UI-only)
+
+        // Validate question before saving
+        const questionError = validateQuestionText(q.text);
+        if (questionError) {
+          push(`Question ${i + 1}: ${questionError}`, "error");
+          continue;
+        }
+
         await addQuestionApi(survey.$id, {
           text: q.text || "New question",
           type: q.type,
           required: !!q.required,
           order: i + 1,
-          options: q.type === "mcq" ? (Array.isArray(q.options) ? q.options : []) : undefined,
+          options:
+            q.type === "mcq"
+              ? Array.isArray(q.options)
+                ? q.options
+                : []
+              : undefined,
           scaleMin: q.type === "scale" ? Number(q.scaleMin ?? 1) : undefined,
           scaleMax: q.type === "scale" ? Number(q.scaleMax ?? 5) : undefined,
         });
         q._new = false;
       }
 
-      push("Survey saved");
-      nav("/", { replace: true });
+      push("✅ Survey saved successfully!", "success");
+      
+      // Trigger Q animation on dashboard
+      localStorage.setItem('questino_trigger_animation', 'cheerfulQ');
+      
+      nav("/app", { replace: true });
     } catch (e) {
-      console.error(e);
-      push(e?.message || "Failed to save", "error");
+      console.error("Save error:", e);
+      console.error("Error type:", e?.constructor?.name);
+      console.error("Error message:", e?.message);
+      console.error("Error stack:", e?.stack);
+      
+      if (e?.message?.includes("CORS") || e?.message?.includes("Failed to fetch")) {
+        push("Network error: Please check your internet connection and try again", "error");
+      } else {
+        push(`Failed to save survey: ${e?.message || "Unknown error"}`, "error");
+      }
+    } finally {
+      setSaving(false);
+      savingRef.current = false;
+      // Reset the timestamp after a delay to allow for proper cleanup
+      setTimeout(() => {
+        setLastSaveTime(null);
+      }, 3000);
     }
   };
 
-  if (loading || !survey) {
+  if (authLoading || loading || !survey) {
     return (
       <div className="min-h-dvh bg-gray-50 flex items-center justify-center">
         <div className="text-center">
@@ -130,32 +287,47 @@ export default function SurveyBuilder() {
               <span className="icon-arrow-left" /> Back
             </button>
             <div className="text-lg font-semibold text-gray-900">Edit Survey</div>
-            <button className="btn btn-primary" onClick={onSave}>
-              Save Changes
+            <button
+              className="btn btn-primary"
+              onClick={onSave}
+              disabled={saving}
+              title={saving ? "Saving…" : "Save changes"}
+            >
+              {saving ? "Saving…" : "Save Changes"}
             </button>
           </div>
         </div>
       </header>
 
       <main className="mx-auto max-w-4xl px-4 py-8">
-        <div className="card p-6 animate-in fade-in-up border-l-4 border-l-brand-500 shadow-lg">
+        <div className="survey-form p-6 animate-in fade-in-up border-l-4 border-l-brand-500 shadow-lg rounded-2xl">
           <label className="mb-1 block text-sm text-gray-600">Title</label>
           <input
-            className="w-full rounded-xl2 border border-gray-200 bg-white px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
-            value={survey.title ?? ""}
-            onChange={(e) => setSurvey((s) => ({ ...s, title: e.target.value }))}
+            className={`w-full rounded-xl2 border bg-white px-3 py-2 focus:outline-none focus:ring-2 ${
+              surveyForm.errors.title ? "border-red-300 focus:ring-red-400" : "border-gray-200 focus:ring-brand-500"
+            }`}
+            value={surveyForm.values.title}
+            onChange={(e) => surveyForm.handleChange("title", e.target.value)}
             placeholder="Untitled survey"
           />
+          {surveyForm.errors.title && (
+            <div className="mt-1 text-xs text-red-600">{surveyForm.errors.title}</div>
+          )}
 
           <label className="mb-1 mt-4 block text-sm text-gray-600">Description</label>
           <textarea
-            className="h-24 w-full resize-none rounded-xl2 border border-gray-200 bg-white px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
-            value={survey.description ?? ""}
-            onChange={(e) => setSurvey((s) => ({ ...s, description: e.target.value }))}
+            className={`h-24 w-full resize-none rounded-xl2 border bg-white px-3 py-2 focus:outline-none focus:ring-2 ${
+              surveyForm.errors.description ? "border-red-300 focus:ring-red-400" : "border-gray-200 focus:ring-brand-500"
+            }`}
+            value={surveyForm.values.description}
+            onChange={(e) => surveyForm.handleChange("description", e.target.value)}
             placeholder="What is this survey about?"
           />
+          {surveyForm.errors.description && (
+            <div className="mt-1 text-xs text-red-600">{surveyForm.errors.description}</div>
+          )}
 
-          {/* Visibility toggles */}
+          {/* Visibility toggles (bound to survey state) */}
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <label className="card flex items-center justify-between p-3">
               <div>
@@ -183,39 +355,19 @@ export default function SurveyBuilder() {
 
         {/* Add question row */}
         <div className="mt-6 flex flex-wrap gap-3">
-          <button 
-            className="btn btn-ghost interactive" 
-            onClick={() => addQuestion("text")}
-            title="Add an open-ended text question"
-          >
+          <button className="btn btn-ghost interactive" onClick={() => addQuestion("text")} title="Add an open-ended text question">
             <span className="icon-message-square" /> Open question
           </button>
-          <button 
-            className="btn btn-ghost interactive" 
-            onClick={() => addQuestion("mcq")}
-            title="Add a multiple choice question"
-          >
+          <button className="btn btn-ghost interactive" onClick={() => addQuestion("mcq")} title="Add a multiple choice question">
             <span className="icon-check-square" /> Multiple choice
           </button>
-          <button 
-            className="btn btn-ghost interactive" 
-            onClick={() => addQuestion("scale")}
-            title="Add a rating scale question"
-          >
+          <button className="btn btn-ghost interactive" onClick={() => addQuestion("scale")} title="Add a rating scale question">
             <span className="icon-bar-chart-3" /> Scale
           </button>
-          <button 
-            className="btn btn-ghost interactive" 
-            onClick={() => addQuestion("slider")}
-            title="Add a slider question (0-10 scale)"
-          >
+          <button className="btn btn-ghost interactive" onClick={() => addQuestion("slider")} title="Add a slider question (0-10 scale)">
             <span className="icon-sliders" /> Slider
           </button>
-          <button 
-            className="btn btn-ghost interactive" 
-            onClick={() => addQuestion("section")}
-            title="Add a section divider"
-          >
+          <button className="btn btn-ghost interactive" onClick={() => addQuestion("section")} title="Add a section divider">
             <span className="icon-folder" /> Section
           </button>
         </div>
@@ -234,7 +386,11 @@ export default function SurveyBuilder() {
             </div>
           ) : (
             questions.map((q, idx) => (
-              <div key={q.$id} className="card p-6 animate-in fade-in-up hover:shadow-lg transition-all duration-300 border-l-4 border-l-accent-500" style={{ animationDelay: `${idx * 50}ms` }}>
+              <div
+                key={q.$id}
+                className="survey-card p-6 animate-in fade-in-up hover:shadow-lg transition-all duration-300 border-l-4 border-l-accent-500 rounded-2xl"
+                style={{ animationDelay: `${idx * 50}ms` }}
+              >
                 <div className="flex items-center justify-between">
                   <div className="text-xs text-gray-500">
                     {idx + 1}. type:&nbsp;<span className="font-medium">{q.type}</span>
@@ -248,11 +404,7 @@ export default function SurveyBuilder() {
                         (min {q.scaleMin ?? 0} – max {q.scaleMax ?? 10})
                       </span>
                     )}
-                    {q.type === "section" && (
-                      <span className="ml-1 opacity-70">
-                        (section divider)
-                      </span>
-                    )}
+                    {q.type === "section" && <span className="ml-1 opacity-70">(section divider)</span>}
                   </div>
                   <button className="btn btn-ghost text-red-600" onClick={() => removeQuestion(q.$id)}>
                     Delete
@@ -342,7 +494,7 @@ export default function SurveyBuilder() {
                   </div>
                 )}
 
-                {/* Slider controls */}
+                {/* Slider controls (UI-only) */}
                 {q.type === "slider" && (
                   <div className="mt-3 flex items-center gap-2 text-sm">
                     <span className="text-gray-600">min</span>
@@ -387,8 +539,9 @@ function Switch({ checked, onChange }) {
     <button
       type="button"
       onClick={() => onChange(!checked)}
-      className={`relative h-6 w-11 rounded-full transition-colors duration-200
-        ${checked ? "bg-brand-500" : "bg-gray-300"}`}
+      className={`relative h-6 w-11 rounded-full transition-colors duration-200 ${
+        checked ? "bg-brand-500" : "bg-gray-300"
+      }`}
       aria-pressed={checked}
       aria-label="Toggle"
     >

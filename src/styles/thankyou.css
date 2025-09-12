@@ -1,0 +1,12 @@
+.confetti { 
+  position: fixed; 
+  inset: 0; 
+  pointer-events: none;
+  animation: fade 1.2s ease-out forwards;
+  background: radial-gradient(circle, rgba(255,255,255,.6) 0, rgba(255,255,255,0) 70%) no-repeat center/200% 200%;
+}
+
+@keyframes fade { 
+  from { opacity: 1 } 
+  to { opacity: 0 } 
+}

@@ -12,6 +12,11 @@ import { account } from "./lib/appwrite"; // owner check
 import { useToast } from "./components/Toast.jsx";
 import { Histogram, PieChart, AnimatedBarChart, EmotionRadar } from "./components/Charts";
 import { LoadingSkeleton } from "./components/LoadingSpinner";
+import { FEATURES } from "./featureFlags";
+import { computeStats } from "./utils/computeStats";
+import EmotionTrends from "./components/EmotionTrends";
+import { useAuth } from "./hooks/useAuth";
+import AIInsightsCard from "./components/AIInsightsCard";
 
 function Bar({ label, value, max }) {
   const pct = max > 0 ? Math.round((value / max) * 100) : 0;
@@ -35,20 +40,60 @@ export default function Stats() {
   const { id } = useParams();
   const nav = useNavigate();
   const { push } = useToast();
+  const { isGuest, user, loading: authLoading } = useAuth();
 
   const [survey, setSurvey] = useState(null);
   const [questions, setQuestions] = useState([]);
   const [responses, setResponses] = useState([]);
   const [analysis, setAnalysis] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [exporting, setExporting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  // Guest data loading functions
+  const loadGuestSurveys = () => {
+    try {
+      const guestSurveys = localStorage.getItem('questino_guest_surveys');
+      return guestSurveys ? JSON.parse(guestSurveys) : [];
+    } catch (e) {
+      console.error("Failed to load guest surveys:", e);
+      return [];
+    }
+  };
+
+  const loadGuestResponses = (surveyId) => {
+    try {
+      const guestResponses = localStorage.getItem('questino_guest_responses');
+      if (guestResponses) {
+        const responses = JSON.parse(guestResponses);
+        return responses.filter(r => r.questionnaireId === surveyId);
+      }
+      return [];
+    } catch (e) {
+      console.error("Failed to load guest responses:", e);
+      return [];
+    }
+  };
+
+  // Compute stats using the new utility
+  const computedStats = useMemo(() => {
+    if (!questions.length || !responses.length) return {};
+    return computeStats(questions, responses);
+  }, [questions, responses]);
 
   const loadData = async (showRefresh = false) => {
     try {
       if (showRefresh) setRefreshing(true);
       else setLoading(true);
       
+      // Don't proceed if auth is still loading
+      if (authLoading) {
+        setLoading(false);
+        setRefreshing(false);
+        return;
+      }
+      
+      // Load data from Appwrite (for all users)
       await ensureSession();
 
       const [s, qs] = await Promise.all([getSurveyById(id), getQuestionsForSurvey(id)]);
@@ -85,7 +130,7 @@ export default function Stats() {
 
   useEffect(() => {
     loadData();
-  }, [id, push]);
+  }, [id, push, isGuest, authLoading]);
 
   // overall emotions (optional global view)
   const nluAvg = useMemo(() => {
@@ -125,7 +170,7 @@ export default function Stats() {
     );
   }
 
-  // Export function must be defined before return statement
+  // Export function for survey creators only
   const exportToCSV = async () => {
     if (responses.length === 0) {
       push("No responses to export", "error");
@@ -218,23 +263,51 @@ export default function Stats() {
                 <span className={`icon-refresh ${refreshing ? 'animate-spin' : ''}`} />
                 {refreshing ? "Refreshing..." : "Refresh"}
               </button>
-              <button
-                onClick={exportToCSV}
-                disabled={exporting || responses.length === 0}
-                className="btn btn-primary text-sm disabled:opacity-50"
-                title="Export responses to CSV"
-              >
-                <span className="icon-download" />
-                {exporting ? "Exporting..." : "Export CSV"}
-              </button>
+              {/* Only show CSV export for survey creators */}
+              {(() => {
+                // Check if user owns the survey (registered user) OR if guest user has survey in localStorage
+                const isOwner = survey && survey.ownerId === user?.$id;
+                const isGuestOwner = isGuest && survey && (() => {
+                  try {
+                    const guestSurveys = JSON.parse(localStorage.getItem('questino_guest_surveys') || '[]');
+                    return guestSurveys.some(s => s.$id === survey.$id);
+                  } catch {
+                    return false;
+                  }
+                })();
+                
+                console.log('CSV Export Debug:', {
+                  survey: survey?.title,
+                  surveyOwnerId: survey?.ownerId,
+                  user: user?.$id,
+                  isMatch: survey?.ownerId === user?.$id,
+                  isGuest: isGuest,
+                  isOwner: isOwner,
+                  isGuestOwner: isGuestOwner,
+                  canExport: isOwner || isGuestOwner
+                });
+                
+                return isOwner || isGuestOwner;
+              })() && (
+                <button
+                  onClick={exportToCSV}
+                  disabled={exporting || responses.length === 0}
+                  className="btn btn-primary text-sm disabled:opacity-50"
+                  title="Export responses to CSV"
+                >
+                  <span className="icon-download" />
+                  {exporting ? "Exporting..." : "Export CSV"}
+                </button>
+              )}
             </div>
           </div>
         </div>
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-8">
-        <div className="grid gap-6 md:grid-cols-3">
-          <div className="card p-6 animate-in fade-in-up border-l-4 border-l-brand-500 shadow-lg">
+        {/* Top Row - Overview Cards */}
+        <div className="grid gap-6 lg:grid-cols-3 mb-8">
+          <div className="survey-card p-6 animate-in fade-in-up border-l-4 border-l-brand-500 shadow-lg group relative">
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 bg-brand-100 rounded-xl flex items-center justify-center">
                 <span className="icon-bar-chart text-brand-600 text-xl"></span>
@@ -244,9 +317,13 @@ export default function Stats() {
                 <div className="mt-1 text-3xl font-bold tabular-nums text-brand-600">{responses.length}</div>
               </div>
             </div>
+            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-800 text-white text-sm rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-10">
+              Number of completed survey responses
+              <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-800"></div>
+            </div>
           </div>
 
-          <div className="card p-6 animate-in fade-in-up border-l-4 border-l-accent-500 shadow-lg">
+          <div className="survey-card p-6 animate-in fade-in-up border-l-4 border-l-accent-500 shadow-lg group relative">
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 bg-accent-100 rounded-xl flex items-center justify-center">
                 <span className="icon-brain text-accent-600 text-xl"></span>
@@ -256,19 +333,58 @@ export default function Stats() {
                 <div className="mt-1 text-3xl font-bold tabular-nums text-accent-600">{analysis.length}</div>
               </div>
             </div>
+            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-800 text-white text-sm rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-10">
+              AI emotion analysis records for responses
+              <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-800"></div>
+            </div>
           </div>
 
-          {nluAvg && (
-            <div className="card p-6 md:col-span-2 animate-in fade-in-up" style={{ animationDelay: '100ms' }}>
+          <div className="survey-card p-6 animate-in fade-in-up border-l-4 border-l-green-500 shadow-lg group relative">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center">
+                <span className="icon-trending-up text-green-600 text-xl"></span>
+              </div>
+              <div>
+                <div className="text-sm text-gray-500">Completion rate</div>
+                <div className="mt-1 text-3xl font-bold tabular-nums text-green-600">
+                  {responses.length > 0 ? Math.round((responses.length / Math.max(questions.length, 1)) * 100) : 0}%
+                </div>
+              </div>
+            </div>
+            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-800 text-white text-sm rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-10">
+              Responses ÷ Questions × 100
+              <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-800"></div>
+            </div>
+          </div>
+        </div>
+
+        {/* AI Insights Row */}
+        {FEATURES.INSIGHTS_ASSISTANT && (
+          <div className="mb-8">
+            <AIInsightsCard
+              survey={survey}
+              stats={computedStats}
+              emotions={nluAvg}
+              weekSummary={{ positivePct: 80 }}
+              questions={questions}
+              responses={responses}
+            />
+          </div>
+        )}
+
+
+        {nluAvg && (
+          <div className="mt-8">
+            <div className="survey-card p-6 animate-in fade-in-up" style={{ animationDelay: '100ms' }}>
               <EmotionRadar emotions={nluAvg} title="Overall emotion analysis" />
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Analysis Status */}
         {responses.length > 0 && analysis.length === 0 && (
           <div className="mt-8">
-            <div className="card p-6 animate-in fade-in-up border-l-4 border-l-yellow-500 shadow-lg bg-yellow-50">
+            <div className="survey-card p-6 animate-in fade-in-up border-l-4 border-l-yellow-500 shadow-lg bg-yellow-50">
               <div className="flex items-center gap-3">
                 <div className="w-12 h-12 bg-yellow-100 rounded-xl flex items-center justify-center">
                   <span className="icon-clock text-yellow-600 text-xl"></span>
@@ -279,6 +395,9 @@ export default function Stats() {
                     Watson NLU is processing {responses.length} response{responses.length !== 1 ? 's' : ''}. 
                     This may take a few moments. Click "Refresh" to check for updates.
                   </p>
+                  <p className="text-xs text-yellow-600 mt-2">
+                    Debug: Responses: {responses.length}, Analysis: {analysis.length}
+                  </p>
                 </div>
               </div>
             </div>
@@ -288,7 +407,7 @@ export default function Stats() {
         {/* Enhanced Analytics Section */}
         {questions.some(q => q.type === "slider") && (
           <div className="mt-8">
-            <div className="card p-6 animate-in fade-in-up border-l-4 border-l-brand-500 shadow-lg">
+            <div className="survey-card p-6 animate-in fade-in-up border-l-4 border-l-brand-500 shadow-lg">
               <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
                 <span className="icon-trending-up text-brand-600"></span>
                 Factor Analysis
@@ -298,10 +417,83 @@ export default function Stats() {
           </div>
         )}
 
+        {/* Basic Stats Section */}
+        {FEATURES.BASIC_STATS && Object.keys(computedStats).length > 0 && (
+          <div className="mt-8">
+            <div className="survey-card p-6 animate-in fade-in-up border-l-4 border-l-green-500 shadow-lg">
+              <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                <span className="icon-bar-chart text-green-600"></span>
+                Basic Statistics
+              </h3>
+              <div className="space-y-6">
+                {questions.map((q, index) => {
+                  const stats = computedStats[q.$id];
+                  if (!stats || stats.count === 0) return null;
+                  
+                  return (
+                    <div key={q.$id} className="p-4 bg-gray-50 rounded-lg">
+                      <div className="mb-3 font-medium text-gray-800">{q.text || "(Untitled question)"}</div>
+                      
+                      {stats.type === 'multiple_choice' && (
+                        <div className="space-y-3">
+                          <div className="text-sm text-gray-600 mb-2">Responses: {stats.count}</div>
+                          <PieChart 
+                            data={Object.entries(stats.counts).map(([option, count]) => ({
+                              label: option,
+                              value: count
+                            }))}
+                            title="Response Distribution"
+                          />
+                        </div>
+                      )}
+                      
+                      {stats.type === 'scale' && (
+                        <div className="space-y-3">
+                          <div className="text-sm text-gray-600 mb-2">Responses: {stats.count}</div>
+                          <div className="text-lg font-semibold text-brand-600">
+                            Average: {stats.average}
+                          </div>
+                          {stats.min !== undefined && stats.max !== undefined && (
+                            <div className="text-sm text-gray-500">
+                              Range: {stats.min} - {stats.max}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      
+                      {stats.type === 'yes_no' && (
+                        <div className="space-y-3">
+                          <div className="text-sm text-gray-600 mb-2">Responses: {stats.count}</div>
+                          <PieChart 
+                            data={[
+                              { label: 'Yes', value: stats.yes },
+                              { label: 'No', value: stats.no }
+                            ]}
+                            title="Yes/No Distribution"
+                          />
+                        </div>
+                      )}
+                      
+                      {stats.type === 'text' && (
+                        <div className="text-sm text-gray-600">
+                          Text responses: {stats.count}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Emotion Trends Section */}
+        <EmotionTrends questionnaireId={survey?.$id} />
+
         {/* Per-question breakdown with NLU for text questions */}
         <div className="mt-8 space-y-6">
           {questions.map((q, index) => (
-            <div key={q.$id} className="card p-6 animate-in fade-in-up hover:shadow-lg transition-all duration-300 border-l-4 border-l-accent-500" style={{ animationDelay: `${(index + 2) * 100}ms` }}>
+            <div key={q.$id} className="survey-card p-6 animate-in fade-in-up hover:shadow-lg transition-all duration-300 border-l-4 border-l-accent-500" style={{ animationDelay: `${(index + 2) * 100}ms` }}>
               <div className="mb-1 font-semibold">{q.text || "(Untitled question)"}</div>
 
               {q.type === "text" ? (

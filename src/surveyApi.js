@@ -1,7 +1,8 @@
 // src/surveyApi.js
 import { ID, Query } from "appwrite";
-import { account, db } from "./lib/appwrite";
+import { account, databases } from "./lib/appwrite";
 import { APPWRITE_CONFIG } from "./config/appwrite";
+import { resolveSurveyNameConflict } from "./utils/surveyNameResolver";
 
 const DB_ID = APPWRITE_CONFIG.DATABASE_ID;
 const SURVEYS_ID = APPWRITE_CONFIG.COLLECTIONS.SURVEYS;
@@ -10,19 +11,10 @@ const RESPONSES_ID = APPWRITE_CONFIG.COLLECTIONS.RESPONSES;
 const ANALYSIS_ID = APPWRITE_CONFIG.COLLECTIONS.ANALYSIS;
 
 export async function ensureSession() {
-  try { 
-    await account.get(); 
-    console.log("Session exists");
-  }
-  catch (error) { 
-    console.log("No session, creating anonymous session:", error.message);
-    try {
-      await account.createAnonymousSession();
-      console.log("Anonymous session created successfully");
-    } catch (anonError) {
-      console.error("Failed to create anonymous session:", anonError);
-      throw anonError;
-    }
+  try {
+    await account.get();
+  } catch {
+    await account.createAnonymousSession();
   }
 }
 
@@ -34,55 +26,40 @@ export async function createSurvey({
   allowAnonymous = true,
   isPublic = true,
 }) {
-  console.log("createSurvey called with:", { title, description, allowAnonymous, isPublic });
-  console.log("Database config:", { DB_ID, SURVEYS_ID });
-  
   await ensureSession();
-  console.log("Session ensured");
-  
-  let user;
-  try {
-    user = await account.get();
-    console.log("User retrieved:", user.$id);
-  } catch (error) {
-    console.log("Failed to get user, creating anonymous session:", error.message);
-    // If not authenticated, create anonymous session and try again
-    await account.createAnonymousSession();
-    user = await account.get();
-    console.log("Anonymous user created:", user.$id);
-  }
 
-  const slugBase = (title || "untitled")
+  const user = await account.get();
+
+  // Check for name conflicts
+  const existing = await databases.listDocuments(DB_ID, SURVEYS_ID, [
+    Query.equal("ownerId", [user.$id]),
+    Query.limit(100),
+  ]);
+  const resolvedTitle = resolveSurveyNameConflict(title, existing.documents);
+
+  const slugBase = (resolvedTitle || "untitled")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "");
   const slug = `${slugBase}-${Math.random().toString(36).slice(2, 8)}`;
-  console.log("Generated slug:", slug);
 
   const surveyData = {
     ownerId: user.$id,
-    title,
-    description,
+    title: resolvedTitle,
+    description: String(description ?? ""),
     slug,
-    allowAnonymous,
-    isPublic,
+    allowAnonymous: !!allowAnonymous,
+    isPublic: !!isPublic,
   };
-  console.log("Creating survey with data:", surveyData);
 
-  const result = await db.createDocument(DB_ID, SURVEYS_ID, ID.unique(), surveyData);
-  console.log("Survey created successfully:", result);
-  return result;
+  return databases.createDocument(DB_ID, SURVEYS_ID, ID.unique(), surveyData);
 }
 
-/* ----------------- questions ----------------- */
-
-/** map any legacy UI types -> DB enum */
 function normalizeType(t) {
   if (!t) return "text";
   const x = String(t).toLowerCase();
   if (x === "open" || x === "text") return "text";
   if (x === "scale") return "scale";
-  // treat any choice-like legacy type as mcq
   if (["mcq", "multiple", "single", "yesno", "dichotomous"].includes(x)) return "mcq";
   return "text";
 }
@@ -109,24 +86,24 @@ export async function addQuestion(surveyId, q) {
     scaleMax: type === "scale" ? Number(q.scaleMax ?? 5) : null,
   };
 
-  return db.createDocument(DB_ID, QUESTIONS_ID, ID.unique(), payload);
+  return databases.createDocument(DB_ID, QUESTIONS_ID, ID.unique(), payload);
 }
 
 export async function getQuestionsForSurvey(surveyId) {
   await ensureSession();
-  const res = await db.listDocuments(DB_ID, QUESTIONS_ID, [
+  const res = await databases.listDocuments(DB_ID, QUESTIONS_ID, [
     Query.equal("questionnaireId", [surveyId]),
     Query.orderAsc("order"),
     Query.limit(100),
   ]);
 
-  // parse options JSON & normalize types so UI always gets the same shape
   return res.documents.map((d) => {
     let options = [];
     try {
       options = Array.isArray(d.options) ? d.options : JSON.parse(d.options || "[]");
-    } catch { options = []; }
-
+    } catch {
+      options = [];
+    }
     return {
       ...d,
       type: normalizeType(d.type),
@@ -141,7 +118,7 @@ export async function getQuestionsForSurvey(surveyId) {
 
 export async function getSurveyBySlug(slug) {
   await ensureSession();
-  const res = await db.listDocuments(DB_ID, SURVEYS_ID, [
+  const res = await databases.listDocuments(DB_ID, SURVEYS_ID, [
     Query.equal("slug", [slug]),
     Query.limit(1),
   ]);
@@ -151,7 +128,7 @@ export async function getSurveyBySlug(slug) {
 export async function getMySurveys() {
   await ensureSession();
   const me = await account.get();
-  const res = await db.listDocuments(DB_ID, SURVEYS_ID, [
+  const res = await databases.listDocuments(DB_ID, SURVEYS_ID, [
     Query.equal("ownerId", [me.$id]),
     Query.orderDesc("$createdAt"),
     Query.limit(100),
@@ -161,29 +138,48 @@ export async function getMySurveys() {
 
 export async function getSurveyById(id) {
   await ensureSession();
-  return db.getDocument(DB_ID, SURVEYS_ID, id);
+  return databases.getDocument(DB_ID, SURVEYS_ID, id);
 }
 
 export async function updateSurvey(id, data) {
   await ensureSession();
-  return db.updateDocument(DB_ID, SURVEYS_ID, id, data);
+
+  // Only send fields the collection actually has
+  const body = {};
+  if ("title" in data) body.title = String(data.title ?? "").trim() || "Untitled survey";
+  if ("description" in data) body.description = String(data.description ?? "");
+  if ("isPublic" in data) body.isPublic = Boolean(data.isPublic);
+  if ("statsPublic" in data) body.statsPublic = Boolean(data.statsPublic);
+
+  // Resolve title conflict if we’re changing it
+  if ("title" in body) {
+    const me = await account.get();
+    const existing = await databases.listDocuments(DB_ID, SURVEYS_ID, [
+      Query.equal("ownerId", [me.$id]),
+      Query.notEqual("$id", [id]),
+      Query.limit(100),
+    ]);
+    body.title = resolveSurveyNameConflict(body.title, existing.documents);
+  }
+
+  return databases.updateDocument(DB_ID, SURVEYS_ID, id, body);
 }
 
 export async function deleteSurveys(ids = []) {
   await ensureSession();
-  return Promise.allSettled(ids.map((id) => db.deleteDocument(DB_ID, SURVEYS_ID, id)));
+  return Promise.allSettled(ids.map((id) => databases.deleteDocument(DB_ID, SURVEYS_ID, id)));
 }
 
 export async function deleteQuestion(questionId) {
   await ensureSession();
-  return db.deleteDocument(DB_ID, QUESTIONS_ID, questionId);
+  return databases.deleteDocument(DB_ID, QUESTIONS_ID, questionId);
 }
 
 /* ----------------- responses & analysis ----------------- */
 
 export async function listResponsesBySurvey(surveyId) {
   await ensureSession();
-  const res = await db.listDocuments(DB_ID, RESPONSES_ID, [
+  const res = await databases.listDocuments(DB_ID, RESPONSES_ID, [
     Query.equal("questionnaireId", [surveyId]),
     Query.orderDesc("$createdAt"),
     Query.limit(200),
@@ -191,14 +187,11 @@ export async function listResponsesBySurvey(surveyId) {
   return res.documents;
 }
 
-/**
- * Useful when ANALYSIS docs do not store surveyId.
- * Joins by responseId.
- */
+/** Join analysis by responseId when analysis docs don’t store surveyId */
 export async function listAnalysisJoinedBySurvey(surveyId) {
   await ensureSession();
 
-  const responses = await db.listDocuments(DB_ID, RESPONSES_ID, [
+  const responses = await databases.listDocuments(DB_ID, RESPONSES_ID, [
     Query.equal("questionnaireId", [surveyId]),
     Query.limit(200),
   ]);
@@ -206,7 +199,7 @@ export async function listAnalysisJoinedBySurvey(surveyId) {
   const ids = responses.documents.map((r) => r.$id);
   if (ids.length === 0) return { responses: [], analysis: [] };
 
-  const analysis = await db.listDocuments(DB_ID, ANALYSIS_ID, [
+  const analysis = await databases.listDocuments(DB_ID, ANALYSIS_ID, [
     Query.equal("responseId", ids),
     Query.limit(500),
   ]);
@@ -214,10 +207,9 @@ export async function listAnalysisJoinedBySurvey(surveyId) {
   return { responses: responses.documents, analysis: analysis.documents };
 }
 
-/* If your ANALYSIS docs already store surveyId, you can use this instead. */
 export async function listAnalysisBySurvey(surveyId) {
   await ensureSession();
-  const res = await db.listDocuments(DB_ID, ANALYSIS_ID, [
+  const res = await databases.listDocuments(DB_ID, ANALYSIS_ID, [
     Query.equal("surveyId", [surveyId]),
     Query.limit(500),
   ]);

@@ -1,0 +1,20 @@
+export const FEATURES = {
+  LANDING_V2: true,
+  ANON_ENFORCE: true,
+  QR_CODES: true,
+  THANK_YOU_ANIM: true,
+  BASIC_STATS: true,
+  EMOTION_TRENDS: true,
+  INSIGHTS_ASSISTANT: true,
+  AI_BUILDER: true,
+  ONE_BY_ONE: true,   // for conversational mode toggle
+  CONVERSATIONAL_MODE: true,
+  VOICE_READOUT: true,
+  VOICE_INPUT: true,
+  REWARD_ANIMATIONS: true,
+  REWARD_SOUNDS: true,
+  AUTH_MAGIC_LINK: true,
+  AUTH_EMAIL_OTP: true,
+  GUEST_PERSIST_LOCAL: true,
+  SIGNOUT_PROMPT: true,
+};

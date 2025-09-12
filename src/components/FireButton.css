@@ -1,0 +1,73 @@
+/* Import the fire animations */
+@import '../styles/fire-animations.css';
+
+/* Additional FireButton specific styles */
+.fire-button {
+  position: relative;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transform-origin: center;
+}
+
+.fire-button:hover {
+  transform: scale(1.02);
+}
+
+.fire-button:active {
+  transform: scale(0.98);
+}
+
+/* Enhanced fire effect for the button */
+.fire-button.fire-active {
+  position: relative;
+  z-index: 10;
+}
+
+/* Fire particles around the button */
+.fire-button.fire-active::before {
+  content: '';
+  position: absolute;
+  top: -15px;
+  left: -15px;
+  right: -15px;
+  bottom: -15px;
+  background: 
+    radial-gradient(circle at 20% 20%, rgba(255, 107, 53, 0.6) 0%, transparent 50%),
+    radial-gradient(circle at 80% 20%, rgba(247, 147, 30, 0.6) 0%, transparent 50%),
+    radial-gradient(circle at 20% 80%, rgba(255, 210, 63, 0.6) 0%, transparent 50%),
+    radial-gradient(circle at 80% 80%, rgba(255, 107, 53, 0.6) 0%, transparent 50%);
+  border-radius: 20px;
+  z-index: -1;
+  animation: fireParticles 1s ease-in-out infinite alternate;
+}
+
+@keyframes fireParticles {
+  0% {
+    transform: scale(1) rotate(0deg);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(1.1) rotate(2deg);
+    opacity: 0.9;
+  }
+}
+
+/* Smooth transitions for all states */
+.fire-button,
+.fire-button::before,
+.fire-button::after {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Ensure button text remains readable */
+.fire-button.fire-active {
+  color: white;
+  text-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+}
+
+/* Fire glow effect */
+.fire-button.fire-active {
+  box-shadow: 
+    0 0 20px rgba(255, 107, 53, 0.8),
+    0 0 40px rgba(247, 147, 30, 0.6),
+    0 0 60px rgba(255, 210, 63, 0.4);
+}

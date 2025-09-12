@@ -1,0 +1,185 @@
+/* Fire Button Animation */
+.fire-button {
+  position: relative;
+  overflow: visible;
+  transition: all 0.3s ease;
+}
+
+/* Smooth transition when fire stops */
+.fire-button:not(.fire-active) {
+  transition: all 2s ease-out;
+}
+
+.fire-button::before {
+  content: '';
+  position: absolute;
+  top: -10px;
+  left: -10px;
+  right: -10px;
+  bottom: -10px;
+  background: linear-gradient(45deg, #ff6b35, #f7931e, #ffd23f, #ff6b35);
+  border-radius: 16px;
+  z-index: -1;
+  opacity: 0;
+  animation: fireGlow 2s ease-in-out infinite alternate;
+  transition: opacity 2s ease-out;
+}
+
+.fire-button::after {
+  content: '';
+  position: absolute;
+  top: -20px;
+  left: -20px;
+  right: -20px;
+  bottom: -20px;
+  background: radial-gradient(circle, rgba(255, 107, 53, 0.3) 0%, rgba(247, 147, 30, 0.2) 30%, transparent 70%);
+  border-radius: 20px;
+  z-index: -2;
+  opacity: 0;
+  animation: fireAura 1.5s ease-in-out infinite alternate;
+  transition: opacity 2s ease-out;
+}
+
+.fire-button.fire-active {
+  transform: scale(1.05);
+  filter: drop-shadow(0 0 20px rgba(255, 107, 53, 0.8));
+  animation: fireWarp 0.8s ease-in-out infinite alternate;
+}
+
+.fire-button.fire-active::before {
+  opacity: 1;
+}
+
+.fire-button.fire-active::after {
+  opacity: 1;
+}
+
+/* Fire Animation Keyframes */
+@keyframes fireGlow {
+  0% {
+    background: linear-gradient(45deg, #ff6b35, #f7931e, #ffd23f, #ff6b35);
+    transform: scale(1);
+  }
+  100% {
+    background: linear-gradient(45deg, #ffd23f, #ff6b35, #f7931e, #ffd23f);
+    transform: scale(1.02);
+  }
+}
+
+@keyframes fireAura {
+  0% {
+    transform: scale(1) rotate(0deg);
+    opacity: 0.3;
+  }
+  100% {
+    transform: scale(1.1) rotate(5deg);
+    opacity: 0.6;
+  }
+}
+
+@keyframes fireWarp {
+  0% {
+    transform: scale(1.05) skewX(0deg);
+  }
+  25% {
+    transform: scale(1.08) skewX(1deg);
+  }
+  50% {
+    transform: scale(1.06) skewX(-1deg);
+  }
+  75% {
+    transform: scale(1.09) skewX(0.5deg);
+  }
+  100% {
+    transform: scale(1.07) skewX(-0.5deg);
+  }
+}
+
+/* Purple Smoke Explosion */
+.smoke-explosion {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 9999;
+  overflow: hidden;
+}
+
+.smoke-particle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: radial-gradient(circle, rgba(147, 51, 234, 0.8) 0%, rgba(147, 51, 234, 0.4) 50%, transparent 100%);
+  border-radius: 50%;
+  animation: smokeFloat 2s ease-out forwards;
+}
+
+.smoke-particle:nth-child(odd) {
+  background: radial-gradient(circle, rgba(168, 85, 247, 0.8) 0%, rgba(168, 85, 247, 0.4) 50%, transparent 100%);
+}
+
+.smoke-particle:nth-child(3n) {
+  background: radial-gradient(circle, rgba(196, 181, 253, 0.8) 0%, rgba(196, 181, 253, 0.4) 50%, transparent 100%);
+}
+
+@keyframes smokeFloat {
+  0% {
+    transform: translateY(0) scale(0.5);
+    opacity: 1;
+  }
+  50% {
+    transform: translateY(-100px) scale(1.2);
+    opacity: 0.8;
+  }
+  100% {
+    transform: translateY(-300px) scale(2);
+    opacity: 0;
+  }
+}
+
+/* Fire Particles */
+.fire-particle {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  background: radial-gradient(circle, #ff6b35 0%, #f7931e 50%, transparent 100%);
+  border-radius: 50%;
+  animation: fireFloat 1.5s ease-out forwards;
+}
+
+.fire-particle:nth-child(even) {
+  background: radial-gradient(circle, #f7931e 0%, #ffd23f 50%, transparent 100%);
+}
+
+@keyframes fireFloat {
+  0% {
+    transform: translateY(0) scale(0.3);
+    opacity: 1;
+  }
+  50% {
+    transform: translateY(-50px) scale(0.8);
+    opacity: 0.7;
+  }
+  100% {
+    transform: translateY(-150px) scale(1.5);
+    opacity: 0;
+  }
+}
+
+/* Button Reset Animation */
+.button-reset {
+  animation: buttonReset 0.5s ease-out;
+}
+
+@keyframes buttonReset {
+  0% {
+    transform: scale(1.1);
+    filter: brightness(1.2);
+  }
+  100% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+}

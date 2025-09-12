@@ -1,0 +1,233 @@
+.container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1000;
+  overflow: hidden;
+}
+
+.tumbleweed {
+  position: absolute;
+  top: 35%;
+  left: -150px;
+  transform: translateY(-50%);
+  animation: windBlownRoll 6s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+
+.tumbleweedBody {
+  width: 40px;
+  height: 40px;
+  position: relative;
+  animation: tumble 0.3s linear infinite;
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.3));
+}
+
+.tumbleweedSvg {
+  width: 100%;
+  height: 100%;
+  animation: svgTumble 0.3s linear infinite;
+}
+
+/* Core body of the tumbleweed */
+.tumbleweedCore {
+  fill: radial-gradient(circle, #8B4513 0%, #A0522D 50%, #8B4513 100%);
+  stroke: #654321;
+  stroke-width: 0.5;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.2));
+}
+
+/* Abstract fluid lines - like the screenshot */
+.fluidLine {
+  fill: none;
+  stroke: #000000;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  animation: fluidSway 4s ease-in-out infinite alternate;
+}
+
+/* Remove the old classes and wind effect */
+
+.dustTrail {
+  position: absolute;
+  top: 35%;
+  left: -150px;
+  transform: translateY(-50%);
+  animation: windBlownRoll 6s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+
+.dust {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  background: #D2B48C;
+  border-radius: 50%;
+  opacity: 0.6;
+}
+
+.dust:nth-child(1) {
+  top: 20px;
+  left: 20px;
+  animation: dustFloat 0.8s ease-in-out infinite;
+}
+
+.dust:nth-child(2) {
+  top: 15px;
+  left: 30px;
+  animation: dustFloat 0.8s ease-in-out infinite 0.2s;
+}
+
+.dust:nth-child(3) {
+  top: 25px;
+  left: 25px;
+  animation: dustFloat 0.8s ease-in-out infinite 0.4s;
+}
+
+.dust:nth-child(4) {
+  top: 18px;
+  left: 35px;
+  animation: dustFloat 0.8s ease-in-out infinite 0.6s;
+}
+
+.dust:nth-child(5) {
+  top: 22px;
+  left: 28px;
+  animation: dustFloat 0.8s ease-in-out infinite 0.8s;
+}
+
+@keyframes windBlownRoll {
+  0% {
+    left: -150px;
+    transform: translateY(-50%) scale(0.8);
+  }
+  5% {
+    left: 0%;
+    transform: translateY(-50%) scale(1.1);
+  }
+  10% {
+    left: 8%;
+    transform: translateY(-50%) scale(0.9);
+  }
+  15% {
+    left: 15%;
+    transform: translateY(-50%) scale(1.05);
+  }
+  20% {
+    left: 22%;
+    transform: translateY(-50%) scale(0.95);
+  }
+  25% {
+    left: 28%;
+    transform: translateY(-50%) scale(1.02);
+  }
+  30% {
+    left: 35%;
+    transform: translateY(-50%) scale(0.98);
+  }
+  35% {
+    left: 42%;
+    transform: translateY(-50%) scale(1.01);
+  }
+  40% {
+    left: 48%;
+    transform: translateY(-50%) scale(0.99);
+  }
+  45% {
+    left: 55%;
+    transform: translateY(-50%) scale(1.005);
+  }
+  50% {
+    left: 62%;
+    transform: translateY(-50%) scale(1);
+  }
+  55% {
+    left: 68%;
+    transform: translateY(-50%) scale(0.995);
+  }
+  60% {
+    left: 75%;
+    transform: translateY(-50%) scale(1.002);
+  }
+  65% {
+    left: 82%;
+    transform: translateY(-50%) scale(0.998);
+  }
+  70% {
+    left: 88%;
+    transform: translateY(-50%) scale(1.001);
+  }
+  75% {
+    left: 92%;
+    transform: translateY(-50%) scale(0.999);
+  }
+  80% {
+    left: 95%;
+    transform: translateY(-50%) scale(1.0005);
+  }
+  85% {
+    left: 97%;
+    transform: translateY(-50%) scale(0.9995);
+  }
+  90% {
+    left: 98%;
+    transform: translateY(-50%) scale(1.0002);
+  }
+  95% {
+    left: 99%;
+    transform: translateY(-50%) scale(0.9998);
+  }
+  100% {
+    left: calc(100% + 150px);
+    transform: translateY(-50%) scale(1);
+  }
+}
+
+@keyframes tumble {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes svgTumble {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes branchSway {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(2deg);
+  }
+}
+
+@keyframes fluidSway {
+  0% {
+    transform: rotate(0deg) translateX(0px);
+  }
+  100% {
+    transform: rotate(2deg) translateX(1px);
+  }
+}
+
+@keyframes dustFloat {
+  0%, 100% {
+    transform: translateY(0px) scale(1);
+    opacity: 0.6;
+  }
+  50% {
+    transform: translateY(-8px) scale(1.2);
+    opacity: 0.3;
+  }
+}

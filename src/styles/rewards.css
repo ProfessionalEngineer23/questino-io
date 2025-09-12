@@ -1,0 +1,56 @@
+/* container overlay for brief celebrations */
+.reward-overlay{position:fixed;inset:0;pointer-events:none;display:flex;align-items:center;justify-content:center;z-index:60;animation:fadeOut .9s ease forwards}
+@keyframes fadeOut{0%{opacity:1}100%{opacity:0}}
+
+.confetti{
+  width:100%; height:100%;
+  background:
+    radial-gradient(circle at 20% 20%, #ffd166 6px, transparent 7px) 0 0/80px 80px,
+    radial-gradient(circle at 80% 30%, #06d6a0 6px, transparent 7px) 0 0/100px 100px,
+    radial-gradient(circle at 40% 70%, #118ab2 6px, transparent 7px) 0 0/90px 90px,
+    radial-gradient(circle at 70% 50%, #ef476f 6px, transparent 7px) 0 0/110px 110px;
+  filter: blur(0.2px);
+}
+
+.pulse{animation:pulse .5s ease}
+@keyframes pulse{
+  0%{transform:scale(1)}
+  50%{transform:scale(1.03)}
+  100%{transform:scale(1)}
+}
+
+.slideIn{animation:slideIn .28s ease both}
+@keyframes slideIn{
+  from{transform:translateY(10px);opacity:0}
+  to{transform:translateY(0);opacity:1}
+}
+
+/* Submit button celebration animation */
+.submit-celebration{
+  animation:submitCelebration 1.2s ease both;
+  background:linear-gradient(45deg,#10b981,#059669,#047857,#065f46);
+  background-size:400% 400%;
+  animation:submitCelebration 1.2s ease both,gradientShift 2s ease infinite;
+  box-shadow:0 0 20px rgba(16,185,129,0.6),0 0 40px rgba(16,185,129,0.4);
+  transform:scale(1.05);
+}
+
+@keyframes submitCelebration{
+  0%{transform:scale(1) rotate(0deg)}
+  10%{transform:scale(1.1) rotate(-2deg)}
+  20%{transform:scale(1.15) rotate(2deg)}
+  30%{transform:scale(1.1) rotate(-1deg)}
+  40%{transform:scale(1.2) rotate(1deg)}
+  50%{transform:scale(1.15) rotate(-0.5deg)}
+  60%{transform:scale(1.1) rotate(0.5deg)}
+  70%{transform:scale(1.05) rotate(-0.2deg)}
+  80%{transform:scale(1.02) rotate(0.2deg)}
+  90%{transform:scale(1.01) rotate(-0.1deg)}
+  100%{transform:scale(1) rotate(0deg)}
+}
+
+@keyframes gradientShift{
+  0%{background-position:0% 50%}
+  50%{background-position:100% 50%}
+  100%{background-position:0% 50%}
+}

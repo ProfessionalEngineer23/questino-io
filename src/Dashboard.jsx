@@ -3,10 +3,18 @@ import { useEffect, useMemo, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { ensureSession, getMySurveys, createSurvey, addQuestion } from "./surveyApi";
+import { resolveCopyNameConflict } from "./utils/surveyNameResolver";
 import { useToast } from "./components/Toast.jsx";
 import { useAuth } from "./hooks/useAuth";
 import AuthModal from "./components/AuthModal";
 import { LoadingSkeleton } from "./components/LoadingSpinner";
+import TumbleweedAnimation from "./components/TumbleweedAnimation";
+import CheerfulQAnimation from "./components/CheerfulQAnimation";
+import FireButton from "./components/FireButton";
+import SignOutPrompt from "./components/SignOutPrompt";
+import { FEATURES } from './featureFlags';
+import AICreateModal from './components/AICreateModal';
+import { endSessionButKeepGuestIndex, ensureGuestSession, getGuestSurveys, isGuestUser, addGuestSurveyId } from './lib/guest';
 import QRCode from "qrcode"; // npm i qrcode
 
 export default function Dashboard() {
@@ -19,35 +27,168 @@ export default function Dashboard() {
   const [bulkAction, setBulkAction] = useState(null); // "delete" | "duplicate"
   const [showTemplates, setShowTemplates] = useState(false);
   const [creatingTemplate, setCreatingTemplate] = useState(false);
+  const [showTumbleweed, setShowTumbleweed] = useState(false);
+  const [showCheerfulQ, setShowCheerfulQ] = useState(false);
+  const [hasShownInitialAnimation, setHasShownInitialAnimation] = useState(false);
+  const [animationInProgress, setAnimationInProgress] = useState(false);
+  const [showAIModal, setShowAIModal] = useState(false);
+  const [showSignOutPrompt, setShowSignOutPrompt] = useState(false);
+  const [lastTemplateCreation, setLastTemplateCreation] = useState(null);
   const nav = useNavigate();
   const { push } = useToast();
-  const { user, isAuthenticated, logout } = useAuth();
+  const { user, isAuthenticated, logout: originalLogout, userMode, isGuest, loading: authLoading } = useAuth();
   const templateRef = useRef(null);
   const buttonRef = useRef(null);
 
+  // Custom logout handler that shows sign-out prompt
+  const handleLogout = async () => {
+    if (FEATURES.SIGNOUT_PROMPT) {
+      setShowSignOutPrompt(true);
+    } else {
+      await originalLogout();
+    }
+  };
+
+  // Handle sign-out prompt choice
+  const handleSignOutChoice = async (choice) => {
+    setShowSignOutPrompt(false);
+    
+    if (choice === 'cancel') {
+      return;
+    }
+
+    // End session but keep guest data
+    await endSessionButKeepGuestIndex();
+
+    if (choice === 'guest') {
+      // Re-create anonymous session and stay on dashboard
+      const success = await ensureGuestSession();
+      if (success) {
+        push('Continuing as Guest', 'info');
+        // Refresh surveys to show guest surveys
+        window.location.reload();
+      } else {
+        push('Failed to continue as Guest', 'error');
+      }
+    } else if (choice === 'signin') {
+      // Navigate to auth page
+      nav('/auth');
+    }
+  };
+
+  // Helper function to trigger animations safely
+  const triggerAnimation = (type) => {
+    if (animationInProgress) {
+      console.log(`Animation already in progress, skipping ${type} animation`);
+      return;
+    }
+    
+    setAnimationInProgress(true);
+    
+    if (type === 'tumbleweed') {
+      setShowTumbleweed(true);
+    } else if (type === 'cheerfulQ') {
+      setShowCheerfulQ(true);
+    }
+  };
+
+  // Function to load surveys
+  const loadSurveys = async () => {
+    try {
+      await ensureSession();
+      const docs = await getMySurveys();
+      
+      // If user is a guest, also load guest surveys from localStorage
+      if (FEATURES.GUEST_PERSIST_LOCAL) {
+        const isGuest = await isGuestUser();
+        if (isGuest) {
+          const guestSurveys = await getGuestSurveys();
+          // Merge guest surveys with regular surveys, avoiding duplicates
+          const allSurveys = [...docs];
+          guestSurveys.forEach(guestSurvey => {
+            if (!allSurveys.find(s => s.$id === guestSurvey.$id)) {
+              allSurveys.push(guestSurvey);
+            }
+          });
+          setSurveys(allSurveys);
+        } else {
+          setSurveys(docs);
+        }
+      } else {
+        setSurveys(docs);
+      }
+    } catch (error) {
+      console.error("Failed to load surveys:", error);
+      push("Failed to load surveys", "error");
+    }
+  };
+
+  const loadGuestSurveys = () => {
+    try {
+      const guestSurveys = localStorage.getItem('questino_guest_surveys');
+      return guestSurveys ? JSON.parse(guestSurveys) : [];
+    } catch (e) {
+      console.error("Failed to load guest surveys:", e);
+      return [];
+    }
+  };
+
+  const saveGuestSurveys = (surveys) => {
+    try {
+      localStorage.setItem('questino_guest_surveys', JSON.stringify(surveys));
+    } catch (e) {
+      console.error("Failed to save guest surveys:", e);
+    }
+  };
+
   useEffect(() => {
+    // Don't run until auth state is determined
+    if (authLoading) return;
+    
     let isMounted = true;
     
     (async () => {
       try {
-        console.log("Testing Appwrite connection...");
+        // Load surveys from Appwrite (for all users)
         await ensureSession();
-        console.log("Session ensured, loading surveys...");
         const docs = await getMySurveys();
-        console.log("Surveys loaded:", docs);
         
         if (isMounted) {
-          setSurveys(docs);
+          // If user is a guest, also load guest surveys from localStorage
+          let allSurveys = docs;
+          if (FEATURES.GUEST_PERSIST_LOCAL) {
+            const isGuest = await isGuestUser();
+            if (isGuest) {
+              const guestSurveys = await getGuestSurveys();
+              // Merge guest surveys with regular surveys, avoiding duplicates
+              allSurveys = [...docs];
+              guestSurveys.forEach(guestSurvey => {
+                if (!allSurveys.find(s => s.$id === guestSurvey.$id)) {
+                  allSurveys.push(guestSurvey);
+                }
+              });
+            }
+          }
+          
+          setSurveys(allSurveys);
+          
+          // Check for animation trigger from other components
+          const animationTrigger = localStorage.getItem('questino_trigger_animation');
+          if (animationTrigger) {
+            localStorage.removeItem('questino_trigger_animation');
+            triggerAnimation(animationTrigger);
+          } else if (!hasShownInitialAnimation) {
+            // Trigger initial animation based on survey count
+            if (allSurveys.length === 0) {
+              triggerAnimation('tumbleweed');
+            }
+            setHasShownInitialAnimation(true);
+          }
         }
       } catch (e) {
         console.error("Failed to load surveys:", e);
-        console.error("Error details:", {
-          message: e.message,
-          code: e.code,
-          type: e.type
-        });
         if (isMounted) {
-          push("Failed to load surveys: " + e.message, "error");
+          push("Failed to load surveys: " + (e.message || "Unknown error"), "error");
         }
       } finally {
         if (isMounted) {
@@ -59,7 +200,48 @@ export default function Dashboard() {
     return () => {
       isMounted = false;
     };
-  }, [push]);
+  }, [push, isGuest, authLoading]);
+
+  // Refresh surveys when user returns to dashboard (e.g., from SurveyBuilder)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      // Refresh surveys when page becomes visible (user returns from another tab/page)
+      if (!document.hidden && !authLoading && !loading) {
+        (async () => {
+          try {
+            await ensureSession();
+            const docs = await getMySurveys();
+            setSurveys(docs);
+          } catch (e) {
+            console.error("Failed to refresh surveys:", e);
+          }
+        })();
+      }
+    };
+
+    const handleFocus = () => {
+      // Also refresh on window focus as backup
+      if (!authLoading && !loading) {
+        (async () => {
+          try {
+            await ensureSession();
+            const docs = await getMySurveys();
+            setSurveys(docs);
+          } catch (e) {
+            console.error("Failed to refresh surveys:", e);
+          }
+        })();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleFocus);
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [authLoading, loading]);
 
   // Close templates dropdown when clicking outside
   useEffect(() => {
@@ -86,42 +268,67 @@ export default function Dashboard() {
   };
 
   const createFromTemplate = async (templateType) => {
-    console.log("Creating template:", templateType);
+    // Prevent multiple calls
+    if (creatingTemplate) {
+      console.log('Template creation already in progress, aborting');
+      return;
+    }
+    
+    // Prevent rapid successive calls (within 2 seconds)
+    const now = Date.now();
+    if (lastTemplateCreation && (now - lastTemplateCreation) < 2000) {
+      console.log('Template creation too recent, ignoring');
+      return;
+    }
+    
+    console.log(`Starting template creation for: ${templateType}`);
+    setLastTemplateCreation(now);
     setShowTemplates(false);
     setCreatingTemplate(true);
-    
-    // Allow template creation in guest mode too
-    console.log("User authenticated:", isAuthenticated);
 
     try {
-      console.log("Starting template creation...");
+      push("Creating survey...", "info");
       
-      // Test Appwrite connection first
-      console.log("Testing Appwrite connection...");
-      await ensureSession();
-      console.log("Appwrite connection successful");
+      if (!isGuest) {
+        await ensureSession();
+      }
       
       // Define template data
       const templates = {
         happiness: {
           title: "Happiness Assessment",
-          description: "A comprehensive assessment of your life satisfaction across key areas",
+          description: "Research-based evaluation of your wellbeing across 6 key life areas from the World Happiness Report framework",
           questions: [
-            // Core Life Areas (10 questions for faster creation)
-            { text: "How satisfied are you with your current financial situation?", type: "scale", scaleMin: 0, scaleMax: 10, required: true, order: 1 },
-            { text: "How would you rate your work-life balance?", type: "scale", scaleMin: 0, scaleMax: 10, required: true, order: 2 },
-            { text: "How satisfied are you with your social relationships?", type: "scale", scaleMin: 0, scaleMax: 10, required: true, order: 3 },
+            // Economic Wellbeing (1 question)
+            { text: "How easily can you afford basic necessities (food, housing, healthcare)?", type: "scale", scaleMin: 0, scaleMax: 10, required: true, order: 1 },
+            
+            // Social Connections (2 questions)
+            { text: "How satisfied are you with your family relationships?", type: "scale", scaleMin: 0, scaleMax: 10, required: true, order: 2 },
+            { text: "How many people can you count on for help in tough times?", type: "scale", scaleMin: 0, scaleMax: 10, required: true, order: 3 },
+            
+            // Health (2 questions)
             { text: "How would you rate your overall physical health?", type: "scale", scaleMin: 0, scaleMax: 10, required: true, order: 4 },
             { text: "How would you rate your mental and emotional well-being?", type: "scale", scaleMin: 0, scaleMax: 10, required: true, order: 5 },
-            { text: "How satisfied are you with your personal growth and development?", type: "scale", scaleMin: 0, scaleMax: 10, required: true, order: 6 },
-            { text: "How clear is your sense of purpose in life?", type: "scale", scaleMin: 0, scaleMax: 10, required: true, order: 7 },
-            { text: "How satisfied are you with your living environment?", type: "scale", scaleMin: 0, scaleMax: 10, required: true, order: 8 },
-            { text: "How would you rate your overall life satisfaction?", type: "scale", scaleMin: 0, scaleMax: 10, required: true, order: 9 },
-            { text: "How optimistic are you about your future?", type: "scale", scaleMin: 0, scaleMax: 10, required: true, order: 10 },
             
-            // Open-ended questions
+            // Freedom (1 question)
+            { text: "How much control do you feel you have over your life?", type: "scale", scaleMin: 0, scaleMax: 10, required: true, order: 6 },
+            
+            // Purpose & Meaning (2 questions)
+            { text: "How much sense of purpose do you have in life?", type: "scale", scaleMin: 0, scaleMax: 10, required: true, order: 7 },
+            { text: "How meaningful does your life feel overall?", type: "scale", scaleMin: 0, scaleMax: 10, required: true, order: 8 },
+            
+            // Trust & Safety (1 question)
+            { text: "How safe do you feel in your daily life?", type: "scale", scaleMin: 0, scaleMax: 10, required: true, order: 9 },
+            
+            // Overall Assessment (1 question)
+            { text: "How would you rate your overall life satisfaction?", type: "scale", scaleMin: 0, scaleMax: 10, required: true, order: 10 },
+            
+            // Open-ended questions for emotion analysis
             { text: "What aspects of your life bring you the most joy?", type: "text", required: false, order: 11 },
-            { text: "What would you most like to improve in your life?", type: "text", required: false, order: 12 }
+            { text: "What challenges or stressors are you currently facing?", type: "text", required: false, order: 12 },
+            { text: "What would you most like to improve in your life?", type: "text", required: false, order: 13 },
+            { text: "Describe a recent moment when you felt truly happy or fulfilled.", type: "text", required: false, order: 14 },
+            { text: "What gives your life the most meaning and purpose?", type: "text", required: false, order: 15 }
           ]
         },
         feedback: {
@@ -158,62 +365,60 @@ export default function Dashboard() {
         return;
       }
 
-      // Create the survey
-      console.log("Creating survey with title:", template.title);
-      const survey = await createSurvey({
+      let survey;
+      
+      // Create survey in Appwrite (for all users)
+      survey = await createSurvey({
         title: template.title,
         description: template.description,
         allowAnonymous: true,
         isPublic: true
       });
-      console.log("Survey created successfully:", survey);
       
       if (!survey || !survey.$id) {
-        throw new Error("Survey creation failed - no survey ID returned");
+        throw new Error("Survey creation failed");
+      }
+
+      // Add to guest survey index if user is a guest
+      if (FEATURES.GUEST_PERSIST_LOCAL) {
+        const isGuest = await isGuestUser();
+        if (isGuest) {
+          addGuestSurveyId(survey.$id);
+        }
+      }
+
+      // Check if the title was modified due to name conflict
+      if (survey.title !== template.title) {
+        push(`Survey renamed to "${survey.title}" to avoid duplicates`, "info");
       }
       
-      // Create the questions in parallel for better performance
-      console.log("Creating questions...");
+      // Create the questions
       push(`Creating ${template.questions.length} questions...`, "info");
       
-      const questionPromises = template.questions.map((questionData, index) => {
-        console.log(`Creating question ${index + 1}/${template.questions.length}:`, questionData.text);
-        return addQuestion(survey.$id, questionData).catch(error => {
-          console.error(`Failed to create question ${index + 1}:`, error);
-          throw error;
-        });
-      });
+      const questionPromises = template.questions.map(questionData => 
+        addQuestion(survey.$id, questionData)
+      );
       
-      const questionResults = await Promise.all(questionPromises);
-      console.log("All questions created successfully:", questionResults.length);
+      await Promise.all(questionPromises);
 
       // Show success message and navigate to the survey
-      console.log("Template creation completed successfully!");
-      console.log("Survey ID for navigation:", survey.$id);
-      push(`✅ ${template.title} created successfully with ${template.questions.length} questions!`, "success");
+      push(`✅ ${template.title} created successfully!`, "success");
       
-      // Add a small delay to ensure the toast is shown
-      setTimeout(() => {
-        console.log("Navigating to survey editor...");
-        console.log("Survey ID for navigation:", survey.$id);
-        console.log("Navigation URL:", `/edit/${survey.$id}`);
-        nav(`/edit/${survey.$id}`);
-      }, 100);
+      // Refresh surveys list
+      const updatedSurveys = await getMySurveys();
+      setSurveys(updatedSurveys);
+      
+      nav(`/edit/${survey.$id}`);
       
     } catch (error) {
       console.error("Template creation failed:", error);
-      console.error("Error details:", {
-        message: error.message,
-        code: error.code,
-        type: error.type,
-        stack: error.stack
-      });
-      
-      // Show specific error message
-      const errorMessage = error.message || "Unknown error occurred";
-      push(`Failed to create survey: ${errorMessage}`, "error");
+      push(`Failed to create survey: ${error.message}`, "error");
     } finally {
       setCreatingTemplate(false);
+      // Reset the timestamp after a delay to allow for proper cleanup
+      setTimeout(() => {
+        setLastTemplateCreation(null);
+      }, 3000);
     }
   };
 
@@ -225,7 +430,7 @@ export default function Dashboard() {
       .map(([id, _]) => id);
 
     if (selectedIds.length === 0) {
-      push("No surveys selected", "error");
+      push("No surveys selected", "warning");
       return;
     }
 
@@ -234,15 +439,19 @@ export default function Dashboard() {
     }
 
     try {
+      push("Deleting surveys...", "info");
       // Import deleteSurveys from surveyApi
       const { deleteSurveys } = await import("./surveyApi");
       await deleteSurveys(selectedIds);
       
       setSurveys(prev => prev.filter(s => !selectedIds.includes(s.$id)));
       setChecked({});
-      push(`Deleted ${selectedIds.length} survey(s)`);
+      push(`✅ Deleted ${selectedIds.length} survey(s)`, "success");
+      
+      // Trigger tumbleweed animation for survey deletion
+      triggerAnimation('tumbleweed');
     } catch (error) {
-      push("Failed to delete surveys", "error");
+      push(`Failed to delete surveys: ${error.message}`, "error");
       console.error(error);
     }
   };
@@ -251,17 +460,24 @@ export default function Dashboard() {
     const selectedSurveys = surveys.filter(s => checked[s.$id]);
     
     if (selectedSurveys.length === 0) {
-      push("No surveys selected", "error");
+      push("No surveys selected", "warning");
       return;
     }
 
     try {
+      push(`Duplicating ${selectedSurveys.length} survey(s)...`, "info");
       const { createSurvey, getQuestionsForSurvey, addQuestion } = await import("./surveyApi");
       
+      // Get current surveys to resolve copy name conflicts
+      const currentSurveys = await getMySurveys();
+      
       for (const survey of selectedSurveys) {
-        // Create new survey
+        // Resolve copy name conflict
+        const copyTitle = resolveCopyNameConflict(survey.title, currentSurveys);
+        
+        // Create new survey with resolved copy name
         const newSurvey = await createSurvey({
-          title: `${survey.title} (Copy)`,
+          title: copyTitle,
           description: survey.description,
           allowAnonymous: survey.allowAnonymous,
           isPublic: survey.isPublic,
@@ -287,9 +503,9 @@ export default function Dashboard() {
       const docs = await getMySurveys();
       setSurveys(docs);
       setChecked({});
-      push(`Duplicated ${selectedSurveys.length} survey(s)`);
+      push(`✅ Duplicated ${selectedSurveys.length} survey(s)`, "success");
     } catch (error) {
-      push("Failed to duplicate surveys", "error");
+      push(`Failed to duplicate surveys: ${error.message}`, "error");
       console.error(error);
     }
   };
@@ -310,13 +526,13 @@ export default function Dashboard() {
     try {
       if (action === "copy") {
         await navigator.clipboard.writeText(url);
-        push("Public link copied");
+        push("✅ Public link copied to clipboard", "success");
       } else if (action === "qr") {
         const dataUrl = await QRCode.toDataURL(url, { margin: 1, scale: 6 });
         setQr({ open: true, title: s.title || "Survey", dataUrl });
       }
-    } catch {
-      push("Action failed", "error");
+    } catch (error) {
+      push(`Failed to ${action === "copy" ? "copy link" : "generate QR code"}: ${error.message}`, "error");
     }
     setOpenShare(null);
   };
@@ -342,33 +558,36 @@ export default function Dashboard() {
             </div>
             <div className="flex items-center gap-3">
               <div className="relative" ref={templateRef}>
-                <button 
+                <FireButton
                   ref={buttonRef}
-                  onClick={() => {
-                    console.log("Create Survey button clicked!");
-                    setShowTemplates(!showTemplates);
-                  }}
+                  onClick={() => setShowTemplates(!showTemplates)}
+                  disabled={showTemplates}
                   className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all duration-200 flex items-center gap-2"
                 >
                   <span className="icon-plus" />
                   Create Survey
                   <span className="icon-chevron-down ml-1" />
-                </button>
-            {showTemplates && createPortal(
-              <div className="fixed inset-0 z-[99999998]" onClick={() => setShowTemplates(false)}>
-                <div className="fixed top-32 right-6 w-80 bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-gray-200/50 z-[99999999]" onClick={(e) => e.stopPropagation()}>
+                </FireButton>
+                <div className={`absolute top-full right-0 mt-2 w-80 bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-gray-200/50 z-[99999999] transition-all duration-300 ease-out transform ${
+                  showTemplates 
+                    ? 'opacity-100 translate-y-0 scale-100' 
+                    : 'opacity-0 -translate-y-2 scale-95 pointer-events-none'
+                }`}>
+                <div onClick={(e) => e.stopPropagation()}>
                     <div className="p-4">
                       <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-4 px-2">Templates</div>
                       <button 
                         onClick={async (e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          console.log("Happiness button clicked!");
+                          if (creatingTemplate) {
+                            console.log('Template creation already in progress, ignoring click');
+                            return;
+                          }
                           try {
                             await createFromTemplate('happiness');
-                            console.log("Template creation completed successfully");
                           } catch (error) {
-                            console.error("Template creation failed:", error);
+                            console.error('Template creation failed:', error);
                             push(`Failed to create template: ${error.message}`, "error");
                           }
                         }}
@@ -378,7 +597,7 @@ export default function Dashboard() {
                         <span className="text-lg">🌟</span>
                         <div className="flex-1">
                           <div className="font-medium">Happiness Assessment</div>
-                          <div className="text-xs text-gray-500">12 questions across key life areas</div>
+                          <div className="text-xs text-gray-500">15 questions across key life areas</div>
                         </div>
                         {creatingTemplate && <div className="w-4 h-4 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin"></div>}
                       </button>
@@ -386,12 +605,10 @@ export default function Dashboard() {
                         onClick={async (e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          console.log("Feedback button clicked!");
+                          if (creatingTemplate) return;
                           try {
                             await createFromTemplate('feedback');
-                            console.log("Template creation completed successfully");
                           } catch (error) {
-                            console.error("Template creation failed:", error);
                             push(`Failed to create template: ${error.message}`, "error");
                           }
                         }}
@@ -408,12 +625,10 @@ export default function Dashboard() {
                         onClick={async (e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          console.log("Employee button clicked!");
+                          if (creatingTemplate) return;
                           try {
                             await createFromTemplate('employee');
-                            console.log("Template creation completed successfully");
                           } catch (error) {
-                            console.error("Template creation failed:", error);
                             push(`Failed to create template: ${error.message}`, "error");
                           }
                         }}
@@ -431,7 +646,6 @@ export default function Dashboard() {
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          console.log("Start from scratch clicked!");
                           setShowTemplates(false);
                           nav("/create");
                         }}
@@ -443,40 +657,33 @@ export default function Dashboard() {
                           <div className="text-xs text-gray-500">Build your own custom survey</div>
                         </div>
                       </button>
-                      <div className="border-t border-gray-100 my-2"></div>
-                      <button 
-                        onClick={async (e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          console.log("Test button clicked!");
-                          try {
-                            await createFromTemplate('feedback');
-                            console.log("Template creation completed successfully");
-                          } catch (error) {
-                            console.error("Template creation failed:", error);
-                            push(`Failed to create template: ${error.message}`, "error");
-                          }
-                        }}
-                        disabled={creatingTemplate}
-                        className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 rounded-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <span className="text-lg">🧪</span>
-                        <div>
-                          <div className="font-medium">Test Template</div>
-                          <div className="text-xs text-gray-500">Test with simple feedback template</div>
-                        </div>
-                      </button>
+                      
+                      {FEATURES.AI_BUILDER && (
+                        <button 
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setShowTemplates(false);
+                            setShowAIModal(true);
+                          }}
+                          className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 rounded-md flex items-center gap-2"
+                        >
+                          <span className="text-lg">🤖</span>
+                          <div>
+                            <div className="font-medium">Start from scratch (AI)</div>
+                            <div className="text-xs text-gray-500">AI-powered survey generation</div>
+                          </div>
+                        </button>
+                      )}
                     </div>
                   </div>
-                </div>,
-                document.body
-              )}
+                </div>
               </div>
               {isAuthenticated ? (
                 <div className="flex items-center gap-3">
                   <span className="text-sm text-gray-600">Hi, {user?.name || user?.email}</span>
                   <button 
-                    onClick={logout} 
+                    onClick={handleLogout} 
                     className="w-8 h-8 bg-gradient-to-br from-gray-200 to-gray-300 rounded-full flex items-center justify-center hover:from-gray-300 hover:to-gray-400 transition-all duration-200" 
                     title="Sign out"
                   >
@@ -589,19 +796,19 @@ export default function Dashboard() {
               <div 
                 key={s.$id} 
                 data-survey-id={s.$id}
-                className="bg-white/90 backdrop-blur-sm rounded-2xl border border-gray-200/50 p-6 hover:shadow-lg transition-shadow duration-200 border-l-4 border-l-indigo-500 group relative z-10"
+                className="survey-card rounded-2xl p-6 border-l-4 border-l-indigo-500 group relative z-10"
               >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-start gap-4 flex-1 min-w-0">
                     <input
                       type="checkbox"
-                      className="cursor-pointer rounded border-gray-300"
+                      className="cursor-pointer rounded border-gray-300 mt-1 flex-shrink-0"
                       checked={!!checked[s.$id]}
                       onChange={() => setChecked((c) => ({ ...c, [s.$id]: !c[s.$id] }))}
                     />
-                    <div>
+                    <div className="flex-1 min-w-0">
                       <button
-                        className="text-left text-xl font-bold text-gray-900 hover:text-indigo-600 transition-colors group-hover:text-indigo-600"
+                        className="text-left text-xl font-bold text-gray-900 hover:text-indigo-600 transition-colors group-hover:text-indigo-600 break-words leading-tight"
                         onClick={() => nav(`/edit/${s.$id}`)}
                         title="Edit survey"
                       >
@@ -615,13 +822,11 @@ export default function Dashboard() {
                         }`}>
                           {s.isPublic ? "🌐 Public" : "🔒 Private"}
                         </span>
-                        <span className="text-gray-300">•</span>
-                        <span className="font-mono text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-md">{s.slug}</span>
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-shrink-0">
                     <button 
                       className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium transition-all duration-200 flex items-center gap-2" 
                       onClick={() => nav(`/stats/${s.$id}`)}
@@ -713,6 +918,38 @@ export default function Dashboard() {
           window.location.reload();
         }}
       />
+
+      {showAIModal && (
+        <AICreateModal 
+          onClose={() => setShowAIModal(false)} 
+          onSurveyCreated={() => {
+            // Refresh surveys list
+            loadSurveys();
+          }}
+        />
+      )}
+
+      {/* Animation Components */}
+      {showTumbleweed && (
+        <TumbleweedAnimation onComplete={() => {
+          setShowTumbleweed(false);
+          setAnimationInProgress(false);
+        }} />
+      )}
+      
+      {showCheerfulQ && (
+        <CheerfulQAnimation onComplete={() => {
+          setShowCheerfulQ(false);
+          setAnimationInProgress(false);
+        }} />
+      )}
+
+      {showSignOutPrompt && (
+        <SignOutPrompt 
+          onChoice={handleSignOutChoice}
+          onClose={() => setShowSignOutPrompt(false)}
+        />
+      )}
     </div>
   );
 }
