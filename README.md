@@ -81,24 +81,6 @@ npm run build
 # Configure your server to serve index.html for all routes
 ```
 
-## 📋 Environment Variables
-
-Create a `.env` file with the following variables:
-
-```env
-# Required
-VITE_APPWRITE_ENDPOINT=https://cloud.appwrite.io/v1
-VITE_APPWRITE_PROJECT_ID=your-project-id
-VITE_APPWRITE_PROJECT_NAME=Questino.io
-
-# Optional (defaults provided)
-VITE_APPWRITE_DATABASE_ID=68b10a4800298b059cf0
-VITE_APPWRITE_SURVEYS_COLLECTION=surveys
-VITE_APPWRITE_QUESTIONS_COLLECTION=questions
-VITE_APPWRITE_RESPONSES_COLLECTION=responses
-VITE_APPWRITE_ANALYSIS_COLLECTION=analysis
-VITE_APPWRITE_WATSON_FUNCTION_ID=68b2b9fe0008a37d0428
-```
 
 ## 🧪 Testing
 
