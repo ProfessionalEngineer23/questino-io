@@ -1,12 +1,12 @@
 // Appwrite configuration
 export const APPWRITE_CONFIG = {
   // Database and collection IDs
-  DATABASE_ID: import.meta.env.VITE_APPWRITE_DATABASE_ID || "68b10a4800298b059cf0",
+  DATABASE_ID: import.meta.env.VITE_DB_ID || "68b10a4800298b059cf0",
   COLLECTIONS: {
-    SURVEYS: import.meta.env.VITE_APPWRITE_SURVEYS_COLLECTION || "surveys",
-    QUESTIONS: import.meta.env.VITE_APPWRITE_QUESTIONS_COLLECTION || "questions", 
-    RESPONSES: import.meta.env.VITE_APPWRITE_RESPONSES_COLLECTION || "responses",
-    ANALYSIS: import.meta.env.VITE_APPWRITE_ANALYSIS_COLLECTION || "analysis",
+    SURVEYS: import.meta.env.VITE_COLLECTION_SURVEYS || "surveys",
+    QUESTIONS: import.meta.env.VITE_COLLECTION_QUESTIONS || "questions", 
+    RESPONSES: import.meta.env.VITE_COLLECTION_RESPONSES || "responses",
+    ANALYSIS: import.meta.env.VITE_COLLECTION_ANALYSIS || "analysis",
   },
   // Function IDs
   FUNCTIONS: {
